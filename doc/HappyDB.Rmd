@@ -1,0 +1,170 @@
+---
+title: "HappyDB"
+author: "Siyi Sun"
+date: "9/17/2018"
+output: html_document
+---
+
+#Load library
+```{r load libraries, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(tidytext)
+library(DT)
+library(Hmisc)
+library(scales)
+library(wordcloud)
+library(wordcloud2)
+library(webshot)
+library(gridExtra)
+library(ngram)
+library(shiny) 
+library(topicmodels)
+library(tm)
+```
+
+```{r load data, warning=FALSE, message=FALSE}
+hm_data <- read_csv("../output/processed_moments.csv")
+senselabel_data <- read.csv("../data/senselabel.csv")
+demo_data <- read.csv("../data/demographic.csv")
+demo_data$age <- as.numeric(demo_data$age)
+
+#head(senselabel_data)
+#head(hm_data1,10)
+#data function,
+#gender: "m", "f"; marital: "single", "married"; parenthood: "y", "n"; reflection_period: "3m", "24h"
+pick_data <- function(data1 = hm_data, data2 = senselabel_data, data3= demo_data, tense = c("NOUN", "VERB"), Gender = c("m", "f"), Marital = c("single", "married"), Parenthood = c("n", "y"), Reflection_period = c("24h", "3m"), age1 = 18, age2 = 69){
+  data1 %>%
+    inner_join(data3, by = "wid") %>%
+  #  inner_join(data2, by = "hmid") %>%
+    select(wid,
+           hmid,
+         original_hm,
+         gender, 
+         marital, 
+         parenthood,
+         reflection_period,
+         age, 
+         country, 
+         text
+         #lowercaseLemma,
+         #POS,
+         #supersenseLabel
+         ) %>%
+  filter(gender %in% Gender) %>%
+  filter(marital %in% Marital) %>%
+  filter(parenthood %in% Parenthood) %>%
+  filter(reflection_period %in% Reflection_period) %>%
+  mutate(reflection_period = fct_recode(reflection_period, 
+                                        months_3 = "3m", hours_24 = "24h")) %>%
+    #filter(POS %in% tense) %>%
+    filter(age >= age1 & age <= age2)
+}
+
+#filter age smaller than 23 and greater than 23
+#by gender
+data_lt23 <- pick_data(age2 = 23)
+data_lt23_female <- pick_data(age2 = 23, Gender = "f")
+data_lt23_male <- pick_data(age2 = 23, Gender = "m")
+data_gt23 <- pick_data(age1 = 23)
+data_gt23_female <- pick_data(age1 = 23, Gender = "f")
+data_gt23_male <- pick_data(age1 = 23, Gender = "m")
+```
+
+```{r text function}
+dtm_freq_generator <- function(data){
+  clean_text <- VCorpus(VectorSource(data$text)) %>%
+    tm_map(content_transformer(tolower)) %>%
+    tm_map(removePunctuation) %>%
+    tm_map(removeNumbers) %>%
+    tm_map(removeWords, character(0)) %>%
+    tm_map(stripWhitespace)
+  text_dtm <- DocumentTermMatrix(clean_text)
+  ui <- unique(text_dtm$i) #gets all the non-zero indices
+  new_dtm <- text_dtm[ui,] #removes all empty rows
+  frequency <- tidy(new_dtm) %>%
+    group_by(term) %>%
+    summarise(count = n()) %>% 
+    arrange(-count)
+  frequency
+}
+
+#dtm
+dtm_lt23 <- dtm_freq_generator(data_lt23)
+dtm_gt23 <- dtm_freq_generator(data_gt23)
+
+dtm_lt23_female <- dtm_freq_generator(data_lt23_female)
+dtm_lt23_male <- dtm_freq_generator(data_lt23_male)
+
+dtm_gt23_female <- dtm_freq_generator(data_gt23_female)
+dtm_gt23_male <- dtm_freq_generator(data_gt23_male)
+#findFreqTerms(new_dtm, lowfreq = 20)
+```
+
+```{r frequencytable warning = F, message = F, echo = F, eval = F}
+#frequencytable 
+frequency_generator <- function(dtm){
+  frequency <- tidy(dtm) %>%
+    group_by(term) %>%
+    summarise(count = n()) %>% 
+    arrange(-count)
+  frequency
+}       
+
+df_lt23 <- frequency_generator(dtm_lt23)
+df_gt23 <- frequency_generator(dtm_gt23)
+
+
+```
+
+```{r}
+#wordcloud
+wordcloud(words = dtm_lt23_female$term, freq = dtm_lt23_female$count, min.freq = 1,
+          max.words=200, random.order=FALSE, rot.per=0.35, 
+          colors=brewer.pal(8, "Dark2"))
+
+par(mfrow=c(2,1))
+wordcloud2(data = dtm_lt23_female)
+head(dtm_lt23)
+head(dtm_lt23_female)
+head(dtm_lt23_male)
+head(dtm_gt23_female)
+head(dtm_gt23_male)
+wordcloud2(data = df_gt23)
+head(df_gt23)
+#class(clean_text)
+```
+
+
+
+
+
+
+
+
+
+```{r model training, eval = F, echo = F}
+text_lda <- LDA(new_dtm, k = 8, method = "VEM", control = NULL)
+text_lda
+```
+###Model Evaluation
+```{r eval = F, echo = F}
+text_topics <- tidy(text_lda, matrix = "beta")
+text_topics %>% arrange(-beta)
+```
+
+```{r eval = F, echo = F}
+text_top_terms <- text_topics  %>%
+  group_by(topic) %>%
+  top_n(10, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+
+text_top_terms %>% 
+  mutate(term = reorder(term, beta)) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = F) +
+  facet_wrap(~topic, scales = "free", ncol = 2) +
+  coord_flip()
+```
+
+

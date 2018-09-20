@@ -35,6 +35,7 @@ library(DT)
 ```{r read data, warning=FALSE, message=FALSE}
 urlfile<-'https://raw.githubusercontent.com/rit-public/HappyDB/master/happydb/data/cleaned_hm.csv'
 hm_data <- read_csv(urlfile)
+head(hm_data,3)
 ```
 
 ### Step 2 - Preliminary cleaning of text
@@ -42,12 +43,19 @@ hm_data <- read_csv(urlfile)
 We clean the text by converting all the letters to the lower case, and removing punctuation, numbers, empty words and extra white space.
 
 ```{r text processing in tm}
+VCorpus(VectorSource(hm_data$cleaned_hm[1:5]))
+input <- c('This is line one.','And this is the second one')
+vecSource <- VectorSource(input)
+VCorpus(vecSource)
+
 corpus <- VCorpus(VectorSource(hm_data$cleaned_hm))%>%
   tm_map(content_transformer(tolower))%>%
   tm_map(removePunctuation)%>%
   tm_map(removeNumbers)%>%
   tm_map(removeWords, character(0))%>%
   tm_map(stripWhitespace)
+
+head(corpus,3)
 ```
 
 ### Step 3 - Stemming words and converting tm object to tidy object
@@ -58,6 +66,7 @@ Stemming reduces a word to its word *stem*. We stem the words here and then conv
 stemmed <- tm_map(corpus, stemDocument) %>%
   tidy() %>%
   select(text)
+head(stemmed)
 ```
 
 ### Step 4 - Creating tidy format of the dictionary to be used for completing stems
@@ -68,6 +77,8 @@ We also need a dictionary to look up the words corresponding to the stems.
 dict <- tidy(corpus) %>%
   select(text) %>%
   unnest_tokens(dictionary, text)
+
+head(dict)
 ```
 
 ### Step 5 - Removing stopwords that don't hold any significant information for our data set
@@ -88,12 +99,15 @@ stop_words <- stop_words %>%
 
 Here we combine the stems and the dictionary into the same "tidy" object.
 
+
 ```{r tidy stems with dictionary}
 completed <- stemmed %>%
   mutate(id = row_number()) %>%
-  unnest_tokens(stems, text) %>%
+  unnest_tokens(stems, text) %>% #split sentence into words
   bind_cols(dict) %>%
   anti_join(stop_words, by = c("dictionary" = "word"))
+
+head(completed)
 ```
 
 ### Step 7 - Stem completion
@@ -104,12 +118,14 @@ Lastly, we complete the stems by picking the corresponding word with the highest
 completed <- completed %>%
   group_by(stems) %>%
   count(dictionary) %>%
-  mutate(word = dictionary[which.max(n)]) %>%
+  mutate(word = dictionary[which.max(n)]) %>% 
   ungroup() %>%
   select(stems, word) %>%
   distinct() %>%
   right_join(completed) %>%
   select(-stems)
+
+head(completed)
 ```
 
 ### Step 8 - Pasting stem completed individual words into their respective happy moments
@@ -121,6 +137,8 @@ completed <- completed %>%
   group_by(id) %>%
   summarise(text = str_c(word, collapse = " ")) %>%
   ungroup()
+
+head(completed)
 ```
 
 ### Step 9 - Keeping a track of the happy moments with their own ID
